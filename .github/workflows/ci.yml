@@ -47,6 +47,10 @@ jobs:
       - name: Run Pytest and Generate Report
         run: |
           pytest --junitxml=report.xml
+      
+      - name: Set up CML
+        uses: iterative/setup-cml@v2
+        
       - name: Generate CML Sanity Report
         env:
           REPO_TOKEN: ${{ secrets.GITHUB_TOKEN }}
