@@ -29,7 +29,7 @@ def test_data_validation():
 
     # Check target column unique values
     species_values = df['species'].unique()
-    expected_species = {'Iris-setosa', 'Iris-versicolor', 'Iris-virginica'}
+    expected_species = {'setosa', 'versicolor', 'virginica'}
     assert set(species_values).issubset(expected_species), "Target column contains unexpected values."
     
     # Check minimum size
