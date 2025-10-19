@@ -1,4 +1,4 @@
-name: Continuous Integration - DVC, Tests, CML
+name: Continuous Integration (CI) - DVC, Tests, CML
 
 permissions:
   contents: write
