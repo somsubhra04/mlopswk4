@@ -1,0 +1,49 @@
+
+name: Continuous Integration - DVC, Tests, CML
+on:
+  push:
+    branches:
+      - dev 
+  pull_request:
+    branches:
+      - main 
+
+jobs:
+  run-tests-and-report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.9'
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pytest dvc[gdrive] cml
+      - name: Configure GCS credentials for DVC
+        run: |
+          echo "${{ secrets.GCP_SA_KEY }}" > gcp_key.json
+          echo "GOOGLE_APPLICATION_CREDENTIALS=gcp_key.json" >> $GITHUB_ENV
+        env:
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+      - name: DVC Pull Data and Model
+        run: dvc pull
+      - name: Run Pytest and Generate Report
+        run: |
+          pytest --junitxml=report.xml
+      - name: Generate CML Sanity Report
+        env:
+          REPO_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "## CI/CD Sanity Report" > report.md
+          echo "### Test Results Summary" >> report.md
+          # Convert JUnit XML to markdown for the PR comment
+          cml pr comment --report report.xml --output-file report.md --append
+          echo "---" >> report.md
+          echo "### DVC Status (Sanity Check)" >> report.md
+          dvc status model.joblib.dvc >> report.md
+          
+          # Post the report as a comment on the PR
+          cml pr comment report.md
