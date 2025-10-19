@@ -37,26 +37,25 @@ jobs:
           GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
           PROJECT_ID: ${{ secrets.PROJECT_ID }}
         run: |
-          echo "$GCP_SA_KEY" > /tmp/key.json
-          gcloud auth activate-service-account --key-file=/tmp/key.json
-          gcloud config set project $PROJECT_ID
-          export GOOGLE_APPLICATION_CREDENTIALS=/tmp/key.json
+          echo "$GCP_SA_KEY" > gcp_key.json
+          echo "GOOGLE_APPLICATION_CREDENTIALS=gcp_key.json" >> $GITHUB_ENV
             
-      - name: Pull data & model
+      - name: DVC Pull Data and Model
+        run: dvc pull
+      - name: Run Pytest and Generate Report
         run: |
-          export GOOGLE_APPLICATION_CREDENTIALS=/tmp/key.json
-          dvc pull -r mygcs --force
-
-      - name: Run tests
-        run: pytest -v -s tests/test_pipeline.py > report.txt
-        
-      - name: Set up CML
-        uses: iterative/setup-cml@v2
-
-      - name: Post CML comment
+          pytest --junitxml=report.xml
+      - name: Generate CML Sanity Report
         env:
           REPO_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "### Pytest Report" > report.md
-          cat report.txt >> report.md
-          cml comment create report.md
+          echo "## CI/CD Sanity Report" > report.md
+          echo "### Test Results Summary" >> report.md
+          # Convert JUnit XML to markdown for the PR comment
+          cml pr comment --report report.xml --output-file report.md --append
+          echo "---" >> report.md
+          echo "### DVC Status (Sanity Check)" >> report.md
+          dvc status model.joblib.dvc >> report.md
+          
+          # Post the report as a comment on the PR
+          cml pr comment report.md
