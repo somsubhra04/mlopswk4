@@ -1,49 +1,62 @@
-
 name: Continuous Integration - DVC, Tests, CML
+
+permissions:
+  contents: write
+  pull-requests: write
+
 on:
   push:
     branches:
       - dev 
   pull_request:
     branches:
-      - main 
+      - main
 
 jobs:
-  run-tests-and-report:
+  test:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
         with:
-          fetch-depth: 0
-      - uses: actions/setup-python@v5
+          python-version: '3.10'
+        
+      # Install DVC using iterative/setup-dvc
+      - uses: iterative/setup-dvc@v1
         with:
-          python-version: '3.9'
-      - name: Install dependencies
-        run: |
-          pip install pandas joblib scikit-learn
-          pip install pytest dvc[gdrive] cml
-      - name: Configure GCS credentials for DVC
-        run: |
-          echo "${{ secrets.GCP_SA_KEY }}" > gcp_key.json
-          echo "GOOGLE_APPLICATION_CREDENTIALS=gcp_key.json" >> $GITHUB_ENV
+          version: 3.63.0
+    
+      - name: Install other dependencies
+        run: pip install pytest pandas joblib scikit-learn
+    
+      - name: Authenticate GCP
         env:
           GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
-      - name: DVC Pull Data and Model
-        run: dvc pull
-      - name: Run Pytest and Generate Report
+          PROJECT_ID: ${{ secrets.PROJECT_ID }}
         run: |
-          pytest --junitxml=report.xml
-      - name: Generate CML Sanity Report
+          echo "$GCP_SA_KEY" > /tmp/key.json
+          gcloud auth activate-service-account --key-file=/tmp/key.json
+          gcloud config set project $PROJECT_ID
+          export GOOGLE_APPLICATION_CREDENTIALS=/tmp/key.json
+            
+      - name: Pull data & model
+        run: |
+          export GOOGLE_APPLICATION_CREDENTIALS=/tmp/key.json
+          dvc pull -r mygcs --force
+
+      - name: Run tests
+        run: pytest -v -s tests/test_pipeline.py > report.txt
+        
+      - name: Set up CML
+        uses: iterative/setup-cml@v2
+
+      - name: Post CML comment
         env:
           REPO_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "## CI/CD Sanity Report" > report.md
-          echo "### Test Results Summary" >> report.md
-          # Convert JUnit XML to markdown for the PR comment
-          cml pr comment --report report.xml --output-file report.md --append
-          echo "---" >> report.md
-          echo "### DVC Status (Sanity Check)" >> report.md
-          dvc status model.joblib.dvc >> report.md
-          
-          # Post the report as a comment on the PR
-          cml pr comment report.md
+          echo "### Pytest Report" > report.md
+          cat report.txt >> report.md
+          cml comment create report.md
