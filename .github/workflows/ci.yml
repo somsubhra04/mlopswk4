@@ -51,17 +51,10 @@ jobs:
       - name: Set up CML
         uses: iterative/setup-cml@v2
         
-      - name: Generate CML Sanity Report
+      - name: Post CML comment
         env:
           REPO_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "## CI/CD Sanity Report" > report.md
-          echo "### Test Results Summary" >> report.md
-      
-          cml report create report.xml --output_format markdown >> report.md
-
-          echo "---" >> report.md
-          echo "### DVC Status (Sanity Check)" >> report.md
-          dvc status model.joblib.dvc >> report.md
-      
-          cml pr comment report.md
+          echo "### Pytest Report" > report.md
+          cat report.txt >> report.md
+          cml comment create report.md
