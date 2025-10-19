@@ -35,14 +35,14 @@ jobs:
       - name: Authenticate GCP
         env:
           GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
-          PROJECT_ID: ${{ secrets.PROJECT_ID }}
         run: |
-          echo "$GCP_SA_KEY" > gcp_key.json
+          echo "$GCP_SA_KEY" > "$GITHUB_WORKSPACE/gcp_key.json"
           echo "GOOGLE_APPLICATION_CREDENTIALS=gcp_key.json" >> $GITHUB_ENV
             
       - name: DVC Pull Data and Model
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ github.workspace }}/gcp_key.json
         run: |
-          export GOOGLE_APPLICATION_CREDENTIALS=gcp_key.json
           dvc pull -r myremote --force
       - name: Run Pytest and Generate Report
         run: |
