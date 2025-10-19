@@ -57,11 +57,11 @@ jobs:
         run: |
           echo "## CI/CD Sanity Report" > report.md
           echo "### Test Results Summary" >> report.md
-          # Convert JUnit XML to markdown for the PR comment
-          cml pr comment --report report.xml --output-file report.md --append
+      
+          cml report create report.xml --output_format markdown >> report.md
+
           echo "---" >> report.md
           echo "### DVC Status (Sanity Check)" >> report.md
           dvc status model.joblib.dvc >> report.md
-          
-          # Post the report as a comment on the PR
+      
           cml pr comment report.md
