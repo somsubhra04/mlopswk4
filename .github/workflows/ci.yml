@@ -41,7 +41,9 @@ jobs:
           echo "GOOGLE_APPLICATION_CREDENTIALS=gcp_key.json" >> $GITHUB_ENV
             
       - name: DVC Pull Data and Model
-        run: dvc pull
+        run: |
+          export GOOGLE_APPLICATION_CREDENTIALS=gcp_key.json
+          dvc pull -r mygcs --force
       - name: Run Pytest and Generate Report
         run: |
           pytest --junitxml=report.xml
