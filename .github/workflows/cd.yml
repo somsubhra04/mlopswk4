@@ -74,7 +74,7 @@ jobs:
     - name: 🔄 Deploy to GKE Cluster
       run: |
         # 1. Substitute the image path in the Kubernetes deployment file
-        sed -i "s|gcr.io/placeholder-project/placeholder-repo/iris-api:latest|${{ env.IMAGE_URI }}|g" ${{ env.K8S_DEPLOYMENT_FILE }}
+        sed -i "s|us-central1-docker.pkg.dev/global-student-472816-d6/iris-repo/iris-api:latest|${{ env.IMAGE_URI }}|g" ${{ env.K8S_DEPLOYMENT_FILE }}
 
         # 2. Apply the updated deployment and service manifests
         echo "Applying Kubernetes manifests..."
