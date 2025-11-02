@@ -21,7 +21,8 @@ spec:
       - name: iris-api
         # The image placeholder will be dynamically replaced by the GitHub Action
         # Format: <region>-docker.pkg.dev/<project-id>/<repo-name>/iris-api:<tag>
-        image: "gcr.io/placeholder-project/placeholder-repo/iris-api:latest"
+        image: us-central1-docker.pkg.dev/global-student-472816-d6/iris-repo/iris-api:latest
+        imagePullPolicy: Always
         ports:
         - containerPort: 8000
         resources:
