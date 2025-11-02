@@ -1,0 +1,85 @@
+# File: .github/workflows/cd.yml
+name: CD to GKE (Build, Push, Deploy)
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'Dockerfile'
+      - 'app.py'
+      - 'requirements.txt'
+      - 'k8s/**'
+
+env:
+  # Define variables using GitHub Secrets configured by the user
+  GCP_PROJECT: ${{ secrets.GCP_PROJECT }}
+  GAR_REGION: ${{ secrets.GAR_REGION }}
+  GAR_REPO: ${{ secrets.GAR_REPO }}
+  GKE_CLUSTER: ${{ secrets.GKE_CLUSTER }}
+  GKE_ZONE: ${{ secrets.GKE_ZONE }}
+  IMAGE_NAME: iris-api
+  K8S_DEPLOYMENT_FILE: k8s/deployment.yaml
+
+jobs:
+  build-push-deploy:
+    runs-on: ubuntu-latest
+    
+    permissions:
+      contents: read
+      packages: write
+      id-token: write # Required for secure OIDC/Workload Identity (recommended for future)
+
+    steps:
+    - name: ⬇️ Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: 🔑 Authenticate to Google Cloud
+      # Uses the Service Account key from GitHub Secret for authentication
+      uses: google-github-actions/auth@v2
+      with:
+        credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+    - name: ⚙️ Set up Cloud SDK and Docker Credentials
+      # Configures gcloud CLI and sets up Docker to use gcloud as a credential helper
+      uses: google-github-actions/setup-gcloud@v2
+      with:
+        install_components: 'kubectl' # Ensure kubectl is installed
+        
+    - name: 🏗️ Build and Push Docker Image to Artifact Registry (GAR)
+      # Define the full image path using the short SHA as a unique tag
+      run: |
+        # 1. Define the full image path for tagging
+        IMAGE_TAG=${{ github.sha }}
+        IMAGE_URI=${{ env.GAR_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT }}/${{ env.GAR_REPO }}/${{ env.IMAGE_NAME }}:${IMAGE_TAG}
+
+        # 2. Configure Docker to authenticate with Artifact Registry
+        gcloud auth configure-docker ${{ env.GAR_REGION }}-docker.pkg.dev
+
+        # 3. Build and tag the Docker image
+        docker build -t ${IMAGE_URI} .
+
+        # 4. Push the image to Google Artifact Registry
+        echo "Pushing ${IMAGE_URI}..."
+        docker push ${IMAGE_URI}
+        echo "IMAGE_URI=${IMAGE_URI}" >> $GITHUB_ENV
+    
+    - name: ☸️ Get Kubeconfig Credentials for GKE
+      # Fetches credentials for the GKE cluster using the authenticated service account
+      uses: google-github-actions/get-gke-credentials@v2
+      with:
+        cluster_name: ${{ env.GKE_CLUSTER }}
+        location: ${{ env.GKE_ZONE }}
+
+    - name: 🔄 Deploy to GKE Cluster
+      run: |
+        # 1. Substitute the image path in the Kubernetes deployment file
+        sed -i "s|gcr.io/placeholder-project/placeholder-repo/iris-api:latest|${{ env.IMAGE_URI }}|g" ${{ env.K8S_DEPLOYMENT_FILE }}
+
+        # 2. Apply the updated deployment and service manifests
+        echo "Applying Kubernetes manifests..."
+        kubectl apply -f ${{ env.K8S_DEPLOYMENT_FILE }}
+
+        # 3. Rollout Status: Wait for the deployment to complete successfully
+        echo "Waiting for deployment rollout to finish..."
+        kubectl rollout status deployment/iris-api-deployment --timeout=5m

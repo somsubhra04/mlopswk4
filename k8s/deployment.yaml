@@ -1,0 +1,49 @@
+# File: k8s/deployment.yaml
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: iris-api-deployment
+  labels:
+    app: iris-api
+spec:
+  # Define the number of replicas (instances) you want
+  replicas: 2
+  selector:
+    matchLabels:
+      app: iris-api
+  template:
+    metadata:
+      labels:
+        app: iris-api
+    spec:
+      containers:
+      - name: iris-api
+        # The image placeholder will be dynamically replaced by the GitHub Action
+        # Format: <region>-docker.pkg.dev/<project-id>/<repo-name>/iris-api:<tag>
+        image: "gcr.io/placeholder-project/placeholder-repo/iris-api:latest"
+        ports:
+        - containerPort: 8000
+        resources:
+          # Define resource requests and limits for scaling
+          requests:
+            memory: "128Mi"
+            cpu: "250m"
+          limits:
+            memory: "256Mi"
+            cpu: "500m"
+---
+# Expose the Deployment internally or externally via a Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: iris-api-service
+spec:
+  selector:
+    app: iris-api
+  # Use LoadBalancer for external access (creates a GCP Load Balancer)
+  type: LoadBalancer
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8000
