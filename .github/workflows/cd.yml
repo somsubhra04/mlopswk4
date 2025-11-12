@@ -1,85 +1,157 @@
 # File: .github/workflows/cd.yml
-name: CD to GKE (Build, Push, Deploy)
+name: CD to GKE (Build, Push, Deploy, Stress Test)
+
 
 on:
   push:
     branches:
-      - main
+      - wk7 # Trigger on push to the new wk7 branch
     paths:
       - 'Dockerfile'
       - 'app.py'
       - 'requirements.txt'
       - 'k8s/**'
 
+
 env:
   # Define variables using GitHub Secrets configured by the user
-  GCP_PROJECT: ${{ secrets.GCP_PROJECT }}
-  GAR_REGION: ${{ secrets.GAR_REGION }}
-  GAR_REPO: ${{ secrets.GAR_REPO }}
-  GKE_CLUSTER: ${{ secrets.GKE_CLUSTER }}
-  GKE_ZONE: ${{ secrets.GKE_ZONE }}
+  GCP_PROJECT: \${{ secrets.GCP_PROJECT }}
+  GAR_REGION: \${{ secrets.GAR_REGION }}
+  GAR_REPO: \${{ secrets.GAR_REPO }}
+  GKE_CLUSTER: \${{ secrets.GKE_CLUSTER }}
+  GKE_ZONE: \${{ secrets.GKE_ZONE }}
   IMAGE_NAME: iris-api
   K8S_DEPLOYMENT_FILE: k8s/deployment.yaml
+  K8S_HPA_FILE: k8s/hpa-scenario1.yaml # Use Scenario 1 HPA for initial test
+
 
 jobs:
   build-push-deploy:
     runs-on: ubuntu-latest
     
-    permissions:
-      contents: read
-      packages: write
-      id-token: write # Required for secure OIDC/Workload Identity (recommended for future)
-
     steps:
     - name: ⬇️ Checkout Repository
       uses: actions/checkout@v4
 
+
     - name: 🔑 Authenticate to Google Cloud
-      # Uses the Service Account key from GitHub Secret for authentication
       uses: google-github-actions/auth@v2
       with:
-        credentials_json: ${{ secrets.GCP_SA_KEY }}
+        credentials_json: \${{ secrets.GCP_SA_KEY }}
 
-    - name: ⚙️ Set up Cloud SDK and Docker Credentials
-      # Configures gcloud CLI and sets up Docker to use gcloud as a credential helper
+
+    - name: ⚙️ Set up Cloud SDK and kubectl
       uses: google-github-actions/setup-gcloud@v2
       with:
-        install_components: 'kubectl' # Ensure kubectl is installed
+        install_components: 'kubectl'
         
-    - name: 🏗️ Build and Push Docker Image to Artifact Registry (GAR)
-      # Define the full image path using the short SHA as a unique tag
+    - name: 🏗️ Build and Push Docker Image
       run: |
-        # 1. Define the full image path for tagging
-        IMAGE_TAG=${{ github.sha }}
-        IMAGE_URI=${{ env.GAR_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT }}/${{ env.GAR_REPO }}/${{ env.IMAGE_NAME }}:${IMAGE_TAG}
+        IMAGE_TAG=\${{ github.sha }}
+        IMAGE_URI=\${{ env.GAR_REGION }}-docker.pkg.dev/\${{ env.GCP_PROJECT }}/\${{ env.GAR_REPO }}/\${{ env.IMAGE_NAME }}:\${IMAGE_TAG}
+        
+        gcloud auth configure-docker \${{ env.GAR_REGION }}-docker.pkg.dev
 
-        # 2. Configure Docker to authenticate with Artifact Registry
-        gcloud auth configure-docker ${{ env.GAR_REGION }}-docker.pkg.dev
 
-        # 3. Build and tag the Docker image
-        docker build -t ${IMAGE_URI} .
+        docker build -t \${IMAGE_URI} .
 
-        # 4. Push the image to Google Artifact Registry
-        echo "Pushing ${IMAGE_URI}..."
-        docker push ${IMAGE_URI}
-        echo "IMAGE_URI=${IMAGE_URI}" >> $GITHUB_ENV
+
+        echo "Pushing \${IMAGE_URI}..."
+        docker push \${IMAGE_URI}
+        echo "IMAGE_URI=\${IMAGE_URI}" >> \$GITHUB_ENV
     
-    - name: ☸️ Get Kubeconfig Credentials for GKE
-      # Fetches credentials for the GKE cluster using the authenticated service account
-      uses: google-github-actions/get-gke-credentials@v2
-      with:
-        cluster_name: ${{ env.GKE_CLUSTER }}
-        location: ${{ env.GKE_ZONE }}
-
-    - name: 🔄 Deploy to GKE Cluster
+    - name: ☸️ Deploy to GKE (Deployment and Service)
       run: |
-        # 1. Substitute the image path in the Kubernetes deployment file
+        # Get Kubeconfig Credentials
+        gcloud container clusters get-credentials \${{ env.GKE_CLUSTER }} --zone \${{ env.GKE_ZONE }}
+
+
+        # Substitute the image path
         sed -i "s|us-central1-docker.pkg.dev/global-student-472816-d6/iris-repo/iris-api:latest|${{ env.IMAGE_URI }}|g" ${{ env.K8S_DEPLOYMENT_FILE }}
 
-        # 2. Apply the updated deployment and service manifests
-        echo "Applying Kubernetes manifests..."
-        kubectl apply -f ${{ env.K8S_DEPLOYMENT_FILE }}
 
-        # 3. Rollout Status: Wait for the deployment to complete successfully
-        echo "Waiting for deployment rollout to finish..."
+        # Apply Deployment and Service
+        kubectl apply -f \${{ env.K8S_DEPLOYMENT_FILE }}
+        
+        # Wait for Deployment Rollout
         kubectl rollout status deployment/iris-api-deployment --timeout=5m
+        
+    - name: 📈 Apply Horizontal Pod Autoscaler (HPA)
+      run: |
+        # Apply the HPA manifest for Scenario 1 (max_pods: 3)
+        kubectl apply -f \${{ env.K8S_HPA_FILE }}
+        echo "HPA applied. Initial status:"
+        kubectl get hpa
+        
+    - name: 🛠️ Install wrk for Stress Testing
+      run: |
+        # wrk is a high-performance HTTP benchmarking tool
+        sudo apt-get update -qq && sudo apt-get install -y wrk
+
+
+    - name: 🌐 Get External Load Balancer IP
+      id: get_ip
+      run: |
+        # Use a loop to wait for the LoadBalancer IP to be provisioned
+        EXTERNAL_IP=""
+        for i in {1..30}; do
+          # Use awk to filter the first non-pending IP address
+          EXTERNAL_IP=\$(kubectl get service iris-api-service -o json | jq -r '.status.loadBalancer.ingress[0].ip' 2>/dev/null)
+          if [ -n "\$EXTERNAL_IP" ] && [ "\$EXTERNAL_IP" != "null" ]; then
+            echo "::set-output name=service_ip::\$EXTERNAL_IP"
+            echo "Service IP: \$EXTERNAL_IP"
+            break
+          fi
+          echo "Waiting for external IP... (Attempt \$i/30)"
+          sleep 10
+        done
+        if [ -z "\$EXTERNAL_IP" ] || [ "\$EXTERNAL_IP" == "null" ]; then
+          echo "Failed to get external IP after 5 minutes."
+          # Continue to cleanup step, but warn
+          exit 0
+        fi
+
+
+    - name: 🚀 SCENARIO 1: Stress Test (Observe Autoscaling to 3 Pods)
+      env:
+        SERVICE_IP: \${{ steps.get_ip.outputs.service_ip }}
+      run: |
+        if [ "\${{ steps.get_ip.outputs.service_ip }}" == "" ]; then
+            echo "Skipping stress test due to missing external IP."
+            exit 0
+        fi
+
+
+        echo "--- SCENARIO 1: Autoscaling Test (Target Max 3 Pods) ---"
+        echo "Initial Pods and HPA Status:"
+        kubectl get pods -l app=iris-api
+        kubectl get hpa iris-api-hpa
+        
+        # Run wrk: 1000 connections, 20 threads, for 60 seconds
+        echo "Starting wrk stress test for 60 seconds (1000 connections/20 threads)..."
+        wrk -t20 -c1000 -d60s http://\${SERVICE_IP}/
+
+
+        echo "--- Mid-Test Status (Wait for 2 min for HPA to react) ---"
+        sleep 120 
+        
+        echo "Post-Stress Pod Status (Should see 2 or 3 Pods running):"
+        kubectl get pods -l app=iris-api
+        
+        echo "Post-Stress HPA Status:"
+        kubectl get hpa iris-api-hpa
+        
+    - name: 🛑 Cleanup HPA and Deployment
+      # This step always runs to clean up resources
+      if: always()
+      run: |
+        gcloud container clusters get-credentials \${{ env.GKE_CLUSTER }} --zone \${{ env.GKE_ZONE }} --quiet
+
+
+        echo "Cleaning up HPA..."
+        kubectl delete hpa iris-api-hpa --ignore-not-found=true
+        
+        echo "Scaling down deployment to 0..."
+        kubectl scale deployment iris-api-deployment --replicas=0
+        
+        echo "Cleanup complete."
