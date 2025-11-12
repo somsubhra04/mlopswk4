@@ -1,5 +1,4 @@
 # File: k8s/deployment.yaml
-
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -7,8 +6,8 @@ metadata:
   labels:
     app: iris-api
 spec:
-  # Define the number of replicas (instances) you want
-  replicas: 2
+  # Base default replicas to start at 1
+  replicas: 1
   selector:
     matchLabels:
       app: iris-api
@@ -19,21 +18,20 @@ spec:
     spec:
       containers:
       - name: iris-api
-        # The image placeholder will be dynamically replaced by the GitHub Action
         image: us-central1-docker.pkg.dev/global-student-472816-d6/iris-repo/iris-api:latest
         imagePullPolicy: Always
         ports:
         - containerPort: 8000
         resources:
-          # Define resource requests and limits for scaling
+          # REQUIRED: HPA targets CPU utilization based on these requests
           requests:
             memory: "128Mi"
-            cpu: "250m"
+            cpu: "200m" # Request 20% of a CPU core
           limits:
             memory: "256Mi"
-            cpu: "500m"
+            cpu: "500m" # Limit to 50% of a CPU core
 ---
-# Expose the Deployment internally or externally via a Service
+# Expose the Deployment externally via a Service
 apiVersion: v1
 kind: Service
 metadata:
@@ -41,7 +39,6 @@ metadata:
 spec:
   selector:
     app: iris-api
-  # Use LoadBalancer for external access (creates a GCP Load Balancer)
   type: LoadBalancer
   ports:
     - protocol: TCP
